@@ -7,10 +7,11 @@ import (
 	"net/http"
 
 	"os"
+
+	"golang.org/x/crypto/bcrypt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var jwtKey = []byte(os.Getenv("JWT_SECRET"))
