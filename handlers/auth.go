@@ -5,7 +5,8 @@ import (
 	"mini-notes/db"
 	"mini-notes/models"
 	"net/http"
-
+	"fmt"
+	"io/ioutil"
 	"os"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,6 +25,13 @@ type Claims struct {
 type authRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type GoogleTokenInfo struct {
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Aud           string `json:"aud"`
+	Sub           string `json:"sub"`
 }
 
 func Register(w http.ResponseWriter, r *http.Request) {
@@ -110,5 +118,83 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"access_token":  accessToken,
 		"refresh_token": refreshTokenStr,
+	})
+}
+
+
+func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + access_token)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("google token verification failed")
+	}
+
+	body, _ := ioutil.ReadAll(resp.Body)
+	var tokenInfo GoogleTokenInfo
+	if err := json.Unmarshal(body, &tokenInfo); err != nil {
+		return nil, err
+	}
+
+	if tokenInfo.Email == "" || tokenInfo.EmailVerified != "true" {
+		return nil, fmt.Errorf("invalid Google user")
+	}
+
+	// Optionally verify tokenInfo.Aud matches your CLIENT_ID
+	return &tokenInfo, nil
+}
+
+
+func GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		token string  // This is the Google ID token
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.token == "" {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	info, err := verifyGoogleToken(req.token)
+	if err != nil {
+		http.Error(w, "Invalid Google token", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if user exists, else create
+	var user models.User
+	err = db.DB.QueryRow("SELECT id FROM users WHERE email = ?", info.Email).Scan(&user.ID)
+	if err != nil {
+		// If not found, insert new user
+		res, err := db.DB.Exec("INSERT INTO users (email) VALUES (?)", info.Email)
+		if err != nil {
+			http.Error(w, "Could not create user", http.StatusInternalServerError)
+			return
+		}
+		id, _ := res.LastInsertId()
+		user.ID = int(id)
+	}
+
+	// Issue access & refresh tokens
+	expiration := time.Now().Add(24 * time.Hour)
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": user.ID,
+		"exp": expiration.Unix(),
+	})
+
+	refreshExpiration := time.Now().Add(7 * 24 * time.Hour)
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": user.ID,
+		"exp": refreshExpiration.Unix(),
+	})
+
+	accessStr, _ := accessToken.SignedString(jwtKey)
+	refreshStr, _ := refreshToken.SignedString(jwtKey)
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":         accessStr,
+		"refresh_token": refreshStr,
 	})
 }
