@@ -157,7 +157,7 @@ func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := verifyGoogleToken(req.token)
+	info, err := verifyGoogleToken(req.Token)
 	if err != nil {
 		http.Error(w, "Invalid Google token", http.StatusUnauthorized)
 		return
