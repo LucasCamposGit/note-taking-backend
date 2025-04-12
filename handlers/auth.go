@@ -150,9 +150,9 @@ func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
 
 func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		token string  // This is the Google ID token
+		Token string `json:"token"` // This is the Google ID token
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.token == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
