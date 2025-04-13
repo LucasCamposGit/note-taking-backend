@@ -19,7 +19,6 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-
 	db.ConnectDB()
 	r := chi.NewRouter()
 
@@ -28,7 +27,7 @@ func main() {
 
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Origin", "https://mini-notes-jade.vercel.app")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			if r.Method == "OPTIONS" {
@@ -38,13 +37,12 @@ func main() {
 			next.ServeHTTP(w, r)
 		})
 	})
-	
 
 	r.Post("/api/register", handlers.Register)
 	r.Post("/api/login", handlers.Login)
 	r.Post("/api/refresh-token", handlers.RefreshToken)
 	r.Post("/api/google-login", handlers.GoogleLogin)
-	
+
 	r.Group(func(r chi.Router) {
 		r.Use(appmw.RequireAuth)
 		r.Get("/api/notes", handlers.GetNotes)
