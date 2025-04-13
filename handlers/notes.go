@@ -5,6 +5,7 @@ import (
 	"mini-notes/db"
 	"mini-notes/models"
 	"net/http"
+	"sort"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -103,7 +104,7 @@ func GetNotesTree(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		note.Replies = []*models.Note{}
-		n := note // create copy to avoid pointer issues
+		n := note
 		noteMap[n.ID] = &n
 		allNotes = append(allNotes, &n)
 	}
@@ -120,6 +121,19 @@ func GetNotesTree(w http.ResponseWriter, r *http.Request) {
 			roots = append(roots, note)
 		}
 	}
+	
+	var sortReplies func(notes []*models.Note)
+	sortReplies = func(notes []*models.Note) {
+		for _, note := range notes {
+			if len(note.Replies) > 0 {
+				sort.SliceStable(note.Replies, func(i, j int) bool {
+					return note.Replies[i].CreatedAt.Before(note.Replies[j].CreatedAt)
+				})
+				sortReplies(note.Replies)
+			}
+		}
+	}
+	sortReplies(roots)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(roots); err != nil {
