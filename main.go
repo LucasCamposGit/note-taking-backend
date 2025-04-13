@@ -49,6 +49,7 @@ func main() {
 		r.Use(appmw.RequireAuth)
 		r.Get("/api/notes", handlers.GetNotes)
 		r.Get("/api/notes/{id}/replies", handlers.GetReplies)
+		r.Get("/api/notes/tree", handlers.GetNotesTree)
 		r.Post("/api/notes", handlers.CreateNote)
 		r.Delete("/api/notes/{id}", handlers.DeleteNote)
 	})

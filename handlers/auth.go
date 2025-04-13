@@ -2,20 +2,27 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"mini-notes/db"
 	"mini-notes/models"
 	"net/http"
-	"fmt"
-	"io/ioutil"
 	"os"
 
-	"golang.org/x/crypto/bcrypt"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"log"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtKey = []byte(os.Getenv("JWT_SECRET"))
+func getJWTSecret() []byte {
+	secret := os.Getenv("JWT_SECRET")
+	log.Printf("Getting JWT secret: '%s'", secret)
+	return []byte(secret)
+}
 
 type Claims struct {
 	UserID int `json:"user_id"`
@@ -65,8 +72,18 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
 	}
+
+	log.Printf("Login - Creating token with claims: %+v", claims)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, _ := token.SignedString(jwtKey)
+	jwtSecret := getJWTSecret()
+	log.Printf("Login - Using JWT Secret: %s", string(jwtSecret))
+	signed, err := token.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("Login - Token signing error: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Login - Generated token for user %d: %s...", user.ID, signed[:10])
 	json.NewEncoder(w).Encode(map[string]string{"token": signed})
 }
 
@@ -89,27 +106,51 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := parsedToken.Claims.(jwt.MapClaims)
-	userID := int(claims["sub"].(float64))
+	// Extract user ID from claims
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	// Try to get user_id first (new format)
+	var userID int
+	if userIDFloat, ok := claims["user_id"].(float64); ok {
+		userID = int(userIDFloat)
+	} else if subFloat, ok := claims["sub"].(float64); ok {
+		// Fallback to sub field (old format)
+		userID = int(subFloat)
+	} else {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
 
 	// Create new tokens
 	expiration := time.Now().Add(24 * time.Hour)
-	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": userID,
-		"exp": expiration.Unix(),
-	})
-	accessToken, err := newToken.SignedString([]byte(secret))
+	newClaims := Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expiration),
+		},
+	}
+	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, newClaims)
+
+	jwtSecret := getJWTSecret()
+	accessToken, err := newToken.SignedString(jwtSecret)
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
 	}
 
 	refreshExpiration := time.Now().Add(7 * 24 * time.Hour)
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": userID,
-		"exp": refreshExpiration.Unix(),
-	})
-	refreshTokenStr, err := refreshToken.SignedString([]byte(secret))
+	refreshClaims := Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(refreshExpiration),
+		},
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenStr, err := refreshToken.SignedString(jwtSecret)
 	if err != nil {
 		http.Error(w, "Refresh token generation failed", http.StatusInternalServerError)
 		return
@@ -120,7 +161,6 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		"refresh_token": refreshTokenStr,
 	})
 }
-
 
 func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
 	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + access_token)
@@ -146,7 +186,6 @@ func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
 	// Optionally verify tokenInfo.Aud matches your CLIENT_ID
 	return &tokenInfo, nil
 }
-
 
 func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -179,19 +218,27 @@ func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Issue access & refresh tokens
 	expiration := time.Now().Add(24 * time.Hour)
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": user.ID,
-		"exp": expiration.Unix(),
-	})
+	claims := Claims{
+		UserID: user.ID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expiration),
+		},
+	}
+
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	refreshExpiration := time.Now().Add(7 * 24 * time.Hour)
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": user.ID,
-		"exp": refreshExpiration.Unix(),
-	})
+	refreshClaims := Claims{
+		UserID: user.ID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(refreshExpiration),
+		},
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
 
-	accessStr, _ := accessToken.SignedString(jwtKey)
-	refreshStr, _ := refreshToken.SignedString(jwtKey)
+	jwtSecret := getJWTSecret()
+	accessStr, _ := accessToken.SignedString(jwtSecret)
+	refreshStr, _ := refreshToken.SignedString(jwtSecret)
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"token":         accessStr,

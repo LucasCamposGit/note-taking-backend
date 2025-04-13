@@ -15,4 +15,5 @@ type Note struct {
 	ParentID  *int       `json:"parent_id"`
 	UserID    int        `json:"user_id"`
 	CreatedAt time.Time  `json:"created_at"`
+	Replies   []*Note    `json:"replies,omitempty"` 
 }
