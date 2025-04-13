@@ -163,7 +163,7 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + access_token)
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + access_token)
 	if err != nil {
 		return nil, err
 	}
