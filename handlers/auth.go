@@ -162,28 +162,44 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func verifyGoogleToken(access_token string) (*GoogleTokenInfo, error) {
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + access_token)
-	if err != nil {
-		return nil, err
+func verifyGoogleToken(token string) (*GoogleTokenInfo, error) {
+	// Try ID token verification first
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + token)
+
+	// If failed, try access token verification
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		resp, err = http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + token)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("google token verification failed")
+		body, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("Google token verification failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("google token verification failed: %s", resp.Status)
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	log.Printf("Google token raw body: %s", string(body))
 	var tokenInfo GoogleTokenInfo
 	if err := json.Unmarshal(body, &tokenInfo); err != nil {
 		return nil, err
 	}
 
 	if tokenInfo.Email == "" || tokenInfo.EmailVerified != "true" {
-		return nil, fmt.Errorf("invalid Google user")
+		return nil, fmt.Errorf("invalid Google user (email empty or not verified)")
 	}
 
-	// Optionally verify tokenInfo.Aud matches your CLIENT_ID
 	return &tokenInfo, nil
 }
 
