@@ -161,18 +161,23 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		"refresh_token": refreshTokenStr,
 	})
 }
-
 func verifyGoogleToken(token string) (*GoogleTokenInfo, error) {
+	log.Printf("Verifying Google token...")
+
 	// Try ID token verification first
 	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + token)
-
-	// If failed, try access token verification
 	if err != nil || resp.StatusCode != 200 {
 		if resp != nil {
+			log.Printf("ID token verification failed: status %d", resp.StatusCode)
 			resp.Body.Close()
+		} else {
+			log.Printf("ID token verification request failed: %v", err)
 		}
+
+		// Try access token verification
 		resp, err = http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + token)
 		if err != nil {
+			log.Printf("Access token verification request failed: %v", err)
 			return nil, err
 		}
 	}
@@ -187,52 +192,68 @@ func verifyGoogleToken(token string) (*GoogleTokenInfo, error) {
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("Error reading Google token response: %v", err)
 		return nil, fmt.Errorf("error reading response body: %v", err)
 	}
 
-	log.Printf("Google token raw body: %s", string(body))
+	log.Printf("Google token raw response: %s", string(body))
+
 	var tokenInfo GoogleTokenInfo
 	if err := json.Unmarshal(body, &tokenInfo); err != nil {
+		log.Printf("Failed to parse Google token info: %v", err)
 		return nil, err
 	}
 
+	log.Printf("Parsed token info: email=%s, verified=%s", tokenInfo.Email, tokenInfo.EmailVerified)
+
 	if tokenInfo.Email == "" || tokenInfo.EmailVerified != "true" {
-		return nil, fmt.Errorf("invalid Google user (email empty or not verified)")
+		log.Printf("Invalid Google user (missing email or not verified)")
+		return nil, fmt.Errorf("invalid Google user")
 	}
 
 	return &tokenInfo, nil
 }
 
 func GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	log.Println("Handling Google login...")
+
 	var req struct {
-		Token string `json:"token"` // This is the Google ID token
+		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
+		log.Printf("Invalid request payload: %v", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	log.Printf("Received token: %s...", req.Token[:12])
 
 	info, err := verifyGoogleToken(req.Token)
 	if err != nil {
+		log.Printf("Token verification failed: %v", err)
 		http.Error(w, "Invalid Google token", http.StatusUnauthorized)
 		return
 	}
 
-	// Check if user exists, else create
+	log.Printf("Verified Google user: %s", info.Email)
+
 	var user models.User
 	err = db.DB.QueryRow("SELECT id FROM users WHERE email = ?", info.Email).Scan(&user.ID)
 	if err != nil {
-		// If not found, insert new user
+		log.Printf("User not found, creating new user: %s", info.Email)
 		res, err := db.DB.Exec("INSERT INTO users (email) VALUES (?)", info.Email)
 		if err != nil {
+			log.Printf("User creation failed: %v", err)
 			http.Error(w, "Could not create user", http.StatusInternalServerError)
 			return
 		}
 		id, _ := res.LastInsertId()
 		user.ID = int(id)
+		log.Printf("Created new user with ID: %d", user.ID)
+	} else {
+		log.Printf("Found existing user with ID: %d", user.ID)
 	}
 
-	// Issue access & refresh tokens
+	// Generate tokens
 	expiration := time.Now().Add(24 * time.Hour)
 	claims := Claims{
 		UserID: user.ID,
@@ -240,7 +261,6 @@ func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: jwt.NewNumericDate(expiration),
 		},
 	}
-
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	refreshExpiration := time.Now().Add(7 * 24 * time.Hour)
@@ -253,8 +273,21 @@ func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
 
 	jwtSecret := getJWTSecret()
-	accessStr, _ := accessToken.SignedString(jwtSecret)
-	refreshStr, _ := refreshToken.SignedString(jwtSecret)
+
+	accessStr, err := accessToken.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("Failed to sign access token: %v", err)
+		http.Error(w, "Token generation failed", http.StatusInternalServerError)
+		return
+	}
+	refreshStr, err := refreshToken.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("Failed to sign refresh token: %v", err)
+		http.Error(w, "Refresh token generation failed", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Tokens generated successfully for user ID: %d", user.ID)
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"token":         accessStr,
