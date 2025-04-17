@@ -79,6 +79,48 @@ func DeleteNote(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"deleted": affected})
 }
 
+func UpdateNote(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	noteID := chi.URLParam(r, "id")
+
+	var updateData struct {
+		Text string `json:"text"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if updateData.Text == "" {
+		http.Error(w, "Text field is required", http.StatusBadRequest)
+		return
+	}
+
+	res, err := db.DB.Exec("UPDATE notes SET text = ? WHERE id = ? AND user_id = ?",
+		updateData.Text, noteID, userID)
+	if err != nil {
+		http.Error(w, "Failed to update note", http.StatusInternalServerError)
+		return
+	}
+
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		http.Error(w, "Note not found or you don't have permission to update it", http.StatusNotFound)
+		return
+	}
+
+	var note models.Note
+	err = db.DB.QueryRow("SELECT id, text, parent_id, user_id, created_at FROM notes WHERE id = ?", noteID).
+		Scan(&note.ID, &note.Text, &note.ParentID, &note.UserID, &note.CreatedAt)
+	if err != nil {
+		http.Error(w, "Failed to fetch updated note", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(note)
+}
+
 func GetNotesTree(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 
@@ -121,7 +163,7 @@ func GetNotesTree(w http.ResponseWriter, r *http.Request) {
 			roots = append(roots, note)
 		}
 	}
-	
+
 	var sortReplies func(notes []*models.Note)
 	sortReplies = func(notes []*models.Note) {
 		for _, note := range notes {

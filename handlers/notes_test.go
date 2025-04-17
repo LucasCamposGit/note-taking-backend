@@ -525,3 +525,154 @@ func TestDeleteNote(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateNote(t *testing.T) {
+	setupNotesTest()
+
+	// Test case 1: Update own note
+	t.Run("Update own note", func(t *testing.T) {
+		// Create request body
+		reqBody := map[string]interface{}{
+			"text": "Updated Test Note",
+		}
+		jsonBody, _ := json.Marshal(reqBody)
+
+		// Create request
+		req, _ := http.NewRequest("PATCH", "/api/notes/1", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Setup chi router context with URL param
+		chiCtx := chi.NewRouteContext()
+		chiCtx.URLParams.Add("id", "1")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+
+		// Add user ID to context
+		ctx := context.WithValue(req.Context(), "userID", 1)
+		req = req.WithContext(ctx)
+
+		// Call handler
+		http.HandlerFunc(UpdateNote).ServeHTTP(rr, req)
+
+		// Check response
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		}
+
+		// Parse response
+		var note map[string]interface{}
+		json.Unmarshal(rr.Body.Bytes(), &note)
+
+		// Verify note was updated properly
+		if note["text"] != "Updated Test Note" {
+			t.Errorf("Expected text 'Updated Test Note', got %v", note["text"])
+		}
+
+		// Verify note is actually updated in database
+		var text string
+		db.DB.QueryRow("SELECT text FROM notes WHERE id = 1").Scan(&text)
+		if text != "Updated Test Note" {
+			t.Errorf("Note text not updated in database, got %s", text)
+		}
+	})
+
+	// Test case 2: Update someone else's note
+	t.Run("Update someone else's note", func(t *testing.T) {
+		// Create request to update note 4 (belongs to user 2)
+		reqBody := map[string]interface{}{
+			"text": "Trying to update someone else's note",
+		}
+		jsonBody, _ := json.Marshal(reqBody)
+
+		// Create request
+		req, _ := http.NewRequest("PATCH", "/api/notes/4", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Setup chi router context with URL param
+		chiCtx := chi.NewRouteContext()
+		chiCtx.URLParams.Add("id", "4")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+
+		// Add user ID to context (user 1)
+		ctx := context.WithValue(req.Context(), "userID", 1)
+		req = req.WithContext(ctx)
+
+		// Call handler
+		http.HandlerFunc(UpdateNote).ServeHTTP(rr, req)
+
+		// Check response - should fail with 404
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+		}
+
+		// Verify note wasn't updated
+		var text string
+		db.DB.QueryRow("SELECT text FROM notes WHERE id = 4").Scan(&text)
+		if text == "Trying to update someone else's note" {
+			t.Errorf("Should not be able to update other user's note")
+		}
+	})
+
+	// Test case 3: Empty text field
+	t.Run("Empty text field", func(t *testing.T) {
+		// Create request with empty text
+		reqBody := map[string]interface{}{
+			"text": "",
+		}
+		jsonBody, _ := json.Marshal(reqBody)
+
+		// Create request
+		req, _ := http.NewRequest("PATCH", "/api/notes/1", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Setup chi router context with URL param
+		chiCtx := chi.NewRouteContext()
+		chiCtx.URLParams.Add("id", "1")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+
+		// Add user ID to context
+		ctx := context.WithValue(req.Context(), "userID", 1)
+		req = req.WithContext(ctx)
+
+		// Call handler
+		http.HandlerFunc(UpdateNote).ServeHTTP(rr, req)
+
+		// Check response - should fail with 400
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusBadRequest)
+		}
+	})
+
+	// Test case 4: Non-existent note
+	t.Run("Non-existent note", func(t *testing.T) {
+		// Create request for non-existent note
+		reqBody := map[string]interface{}{
+			"text": "Update non-existent note",
+		}
+		jsonBody, _ := json.Marshal(reqBody)
+
+		// Create request
+		req, _ := http.NewRequest("PATCH", "/api/notes/999", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Setup chi router context with URL param
+		chiCtx := chi.NewRouteContext()
+		chiCtx.URLParams.Add("id", "999")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, chiCtx))
+
+		// Add user ID to context
+		ctx := context.WithValue(req.Context(), "userID", 1)
+		req = req.WithContext(ctx)
+
+		// Call handler
+		http.HandlerFunc(UpdateNote).ServeHTTP(rr, req)
+
+		// Check response - should fail with 404
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+}

@@ -29,7 +29,7 @@ func main() {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -49,6 +49,7 @@ func main() {
 		r.Get("/api/notes/{id}/replies", handlers.GetReplies)
 		r.Get("/api/notes/tree", handlers.GetNotesTree)
 		r.Post("/api/notes", handlers.CreateNote)
+		r.Patch("/api/notes/{id}", handlers.UpdateNote)
 		r.Delete("/api/notes/{id}", handlers.DeleteNote)
 	})
 

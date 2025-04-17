@@ -148,6 +148,26 @@ All notes endpoints require the `Authorization: Bearer {token}` header.
   }
   ```
 
+#### Update Note
+- **URL**: `/api/notes/{id}`
+- **Method**: `PATCH`
+- **Request Body**:
+  ```json
+  {
+    "text": "Updated note content"
+  }
+  ```
+- **Response**: Updated note object
+  ```json
+  {
+    "id": 1,
+    "text": "Updated note content",
+    "parent_id": null,
+    "user_id": 1,
+    "created_at": "2023-01-01T12:00:00Z"
+  }
+  ```
+
 ## Database Schema
 
 ### Users Table
