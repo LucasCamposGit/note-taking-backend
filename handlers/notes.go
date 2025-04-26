@@ -182,3 +182,93 @@ func GetNotesTree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 	}
 }
+
+func GetNoteWithRelated(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	noteID := chi.URLParam(r, "id")
+
+	// First get the requested note
+	var targetNote models.Note
+	err := db.DB.QueryRow("SELECT id, text, parent_id, user_id, created_at FROM notes WHERE id = ? AND user_id = ?",
+		noteID, userID).Scan(&targetNote.ID, &targetNote.Text, &targetNote.ParentID, &targetNote.UserID, &targetNote.CreatedAt)
+
+	if err != nil {
+		http.Error(w, "Note not found", http.StatusNotFound)
+		return
+	}
+
+	// Get all notes from this user to build the relationship tree
+	rows, err := db.DB.Query(`
+		SELECT id, text, parent_id, user_id, created_at
+		FROM notes
+		WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		http.Error(w, "Failed to fetch notes", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Create a map of all notes and a slice to hold them
+	noteMap := make(map[int]*models.Note)
+	var allNotes []*models.Note
+
+	for rows.Next() {
+		var note models.Note
+		err := rows.Scan(&note.ID, &note.Text, &note.ParentID, &note.UserID, &note.CreatedAt)
+		if err != nil {
+			continue
+		}
+		note.Replies = []*models.Note{}
+		n := note
+		noteMap[n.ID] = &n
+		allNotes = append(allNotes, &n)
+	}
+
+	// Build the relationship structure
+	for _, note := range allNotes {
+		if note.ParentID != nil {
+			parent, ok := noteMap[*note.ParentID]
+			if ok {
+				parent.Replies = append(parent.Replies, note)
+			}
+		}
+	}
+
+	// Sort all replies by creation time
+	var sortReplies func(notes []*models.Note)
+	sortReplies = func(notes []*models.Note) {
+		for _, note := range notes {
+			if len(note.Replies) > 0 {
+				sort.SliceStable(note.Replies, func(i, j int) bool {
+					return note.Replies[i].CreatedAt.Before(note.Replies[j].CreatedAt)
+				})
+				sortReplies(note.Replies)
+			}
+		}
+	}
+
+	// Find the root note - either the target note if it's a parent
+	// or the parent of the target note if it's a child
+	var rootNote *models.Note
+	if targetNote.ParentID == nil {
+		// Target note is a parent, so it's the root
+		rootNote = noteMap[targetNote.ID]
+	} else {
+		// Target note is a child, so find its parent as the root
+		rootNote = noteMap[*targetNote.ParentID]
+	}
+
+	// Sort the replies
+	if rootNote != nil {
+		sortReplies([]*models.Note{rootNote})
+	} else {
+		// If we somehow couldn't find the root, just return the target note
+		rootNote = noteMap[targetNote.ID]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(rootNote); err != nil {
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
+}

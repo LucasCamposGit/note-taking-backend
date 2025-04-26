@@ -46,6 +46,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(appmw.RequireAuth)
 		r.Get("/api/notes", handlers.GetNotes)
+		r.Get("/api/notes/{id}", handlers.GetNoteWithRelated)
 		r.Get("/api/notes/{id}/replies", handlers.GetReplies)
 		r.Get("/api/notes/tree", handlers.GetNotesTree)
 		r.Post("/api/notes", handlers.CreateNote)
